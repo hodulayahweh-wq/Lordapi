@@ -1,7 +1,8 @@
 import telebot, os, zipfile, json
 from py7zr import SevenZipFile
 
-TOKEN = "BURAYA_BOT_TOKEN_YAZ"
+TOKEN = "8467419515:AAFIUi4154gL4QQfwmpjaLAE-ay12O6BjD8"
+BASE_API = "https://lordv3api.onrender.com"
 
 bot = telebot.TeleBot(TOKEN)
 
@@ -59,8 +60,7 @@ def handle(m):
     bot.reply_to(
         m,
         "✅ Veri eklendi\n"
-        "🌐 API:\n"
-        "https://ganstar.onrender.com/api/v1/search?ara=ORNEK&apikey=lord123"
+        f"🌐 API:\n{BASE_API}/api/v1/search?ara=ORNEK&apikey=lord123"
     )
 
 bot.infinity_polling()
