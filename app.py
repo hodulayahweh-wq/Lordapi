@@ -4,10 +4,11 @@ import zipfile
 import py7zr
 from flask import Flask, request, jsonify
 
+# ================= AYARLAR =================
 TOKEN = "8467419515:AAFIUi4154gL4QQfwmpjaLAE-ay12O6BjD8"
-BOT_URL = "https://lordv3api.onrender.com"
+BASE_URL = "https://lordv3api.onrender.com"
 
-bot = telebot.TeleBot(TOKEN)
+bot = telebot.TeleBot(TOKEN, threaded=False)
 app = Flask(__name__)
 
 DATA_FILE = "storage/data.txt"
@@ -18,11 +19,9 @@ os.makedirs("storage", exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(TEMP_DIR, exist_ok=True)
 
-# 🔔 WEBHOOK AYARLA
+# ================ WEBHOOK =================
 bot.remove_webhook()
-bot.set_webhook(url=f"{BOT_URL}/{TOKEN}")
-
-# ================= TELEGRAM =================
+bot.set_webhook(url=f"{BASE_URL}/{TOKEN}")
 
 @app.route(f"/{TOKEN}", methods=["POST"])
 def telegram_webhook():
@@ -32,16 +31,15 @@ def telegram_webhook():
     bot.process_new_updates([update])
     return "OK", 200
 
-
+# ================ BOT =================
 @bot.message_handler(commands=["start"])
 def start(m):
     bot.send_message(
         m.chat.id,
         "✅ LORD API FREE\n\n"
-        "📂 TXT / ZIP / 7Z gönder\n"
+        "📂 TXT / ZIP / 7Z / JSON gönder\n"
         "🌐 API:\nhttps://lordv3api.onrender.com/api/v1/search?ara=DEGER"
     )
-
 
 @bot.message_handler(content_types=["document"])
 def handle_file(m):
@@ -64,7 +62,7 @@ def handle_file(m):
                         out.write(l + "\n")
                         added += 1
 
-        if path.endswith(".txt") or path.endswith(".json"):
+        if path.endswith((".txt", ".json")):
             with open(path, "r", errors="ignore") as f:
                 add_lines(f.readlines())
 
@@ -94,8 +92,7 @@ def handle_file(m):
     except Exception as e:
         bot.send_message(m.chat.id, f"❌ Hata: {e}")
 
-# ================= API =================
-
+# ================ API =================
 @app.route("/")
 def home():
     return "LORD SYSTEM SORGU V3"
@@ -119,6 +116,3 @@ def search():
         "count": len(results),
         "results": results
     })
-
-if __name__ == "__main__":
-    app.run()
