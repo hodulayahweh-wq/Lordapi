@@ -1,4 +1,4 @@
 flask
 gunicorn
-py7zr
 pyTelegramBotAPI
+py7zr
