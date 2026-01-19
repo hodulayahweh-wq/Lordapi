@@ -1,19 +1,16 @@
 from flask import Flask, request, jsonify, send_file
-import os, tempfile, zipfile, json
-from py7zr import SevenZipFile
+import os, tempfile
 
 app = Flask(__name__)
 
 DATA_DIR = "storage"
 MERGED_FILE = os.path.join(DATA_DIR, "data.txt")
-TEMP_DIR = "temp"
 
 API_KEYS = {
     "lord123": "VIP"
 }
 
 os.makedirs(DATA_DIR, exist_ok=True)
-os.makedirs(TEMP_DIR, exist_ok=True)
 
 def check_key(req):
     return req.args.get("apikey") in API_KEYS
