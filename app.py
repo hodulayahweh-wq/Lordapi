@@ -2,9 +2,11 @@ import telebot
 import os
 import zipfile
 import py7zr
+import re
 from flask import Flask, request, jsonify
 
-TOKEN = "8467419515:AAHfTf2QndCl7IoV0-VNVo-p7GvDM7_3N9E"
+# ================= AYARLAR =================
+TOKEN = "8467419515:AAGOsb4Qn7sisuiN4yUwlA5aeZ2j2u_jZSs"
 BASE_URL = "https://lordv3api.onrender.com"
 
 bot = telebot.TeleBot(TOKEN, threaded=False)
@@ -47,9 +49,12 @@ def handle_file(m):
         raw = bot.download_file(file_info.file_path)
 
         filename = m.document.file_name
-        name = os.path.splitext(filename)[0]
 
-        data_path = os.path.join(STORAGE, f"{name}.txt")
+        # 🔒 DATASET ADINI TEMİZLE + KÜÇÜK HARF
+        raw_name = os.path.splitext(filename)[0]
+        dataset = re.sub(r'[^a-zA-Z0-9_]', '', raw_name).lower()
+
+        data_path = os.path.join(STORAGE, f"{dataset}.txt")
 
         added = 0
 
@@ -66,36 +71,39 @@ def handle_file(m):
         with open(temp_file, "wb") as f:
             f.write(raw)
 
-        if filename.endswith((".txt", ".json")):
+        # ===== DOSYA OKUMA =====
+        if filename.lower().endswith((".txt", ".json")):
             with open(temp_file, "r", errors="ignore") as f:
                 add_lines(f.readlines())
 
-        elif filename.endswith(".zip"):
+        elif filename.lower().endswith(".zip"):
             with zipfile.ZipFile(temp_file) as z:
                 for n in z.namelist():
-                    if n.endswith(".txt"):
+                    if n.lower().endswith(".txt"):
                         with z.open(n) as f:
                             add_lines(
                                 f.read().decode(errors="ignore").splitlines()
                             )
 
-        elif filename.endswith(".7z"):
+        elif filename.lower().endswith(".7z"):
             with py7zr.SevenZipFile(temp_file, "r") as z:
                 z.extractall(TEMP_DIR)
             for root, _, files in os.walk(TEMP_DIR):
                 for file in files:
-                    if file.endswith(".txt"):
+                    if file.lower().endswith(".txt"):
                         with open(os.path.join(root, file), "r", errors="ignore") as f:
                             add_lines(f.readlines())
-
-        api_link = f"{BASE_URL}/api/v1/search/{name}?ara=DEGER"
 
         bot.send_message(
             m.chat.id,
             f"✅ Dosya işlendi\n"
-            f"📦 Dosya: {filename}\n"
+            f"📦 Dataset: {dataset}\n"
             f"📄 Eklenen satır: {added}\n\n"
-            f"🌐 Özel API:\n{api_link}"
+            f"🔗 API Endpoint:\n"
+            f"{BASE_URL}/api/v1/search/{dataset}\n\n"
+            f"📌 Kullanım Örneği:\n"
+            f"{BASE_URL}/api/v1/search/{dataset}?ara=ORNEK_DEGER\n\n"
+            f"ℹ️ API gelen isteği okur ve ona göre veri döndürür."
         )
 
     except Exception as e:
@@ -108,16 +116,17 @@ def home():
 
 @app.route("/api/v1/search/<dataset>")
 def search(dataset):
+    dataset = re.sub(r'[^a-zA-Z0-9_]', '', dataset).lower()
     q = request.args.get("ara", "").strip()
-    path = os.path.join(STORAGE, f"{dataset}.txt")
 
+    path = os.path.join(STORAGE, f"{dataset}.txt")
     if not os.path.exists(path):
         return jsonify({"error": "dataset bulunamadı"})
 
     results = []
     with open(path, "r", errors="ignore") as f:
         for line in f:
-            if q in line:
+            if q and q in line:
                 results.append(line.strip())
                 if len(results) >= 50:
                     break
