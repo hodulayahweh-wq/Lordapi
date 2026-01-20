@@ -1,3 +1,5 @@
 pyTelegramBotAPI
 flask
 py7zr
+requests
+gunicorn
