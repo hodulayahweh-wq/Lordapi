@@ -10,8 +10,8 @@ from telegram.ext import (
     Application,
     CommandHandler,
     MessageHandler,
+    ContextTypes,
     filters,
-    ContextTypes
 )
 import uvicorn
 
@@ -33,13 +33,13 @@ os.makedirs(DATA_DIR, exist_ok=True)
 def clean(text: str) -> str:
     return re.sub(r"[^a-z0-9_-]", "", text.lower())
 
-def load_meta() -> dict:
+def load_meta():
     if not os.path.exists(META_FILE):
         return {}
     with open(META_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
 
-def save_meta(data: dict):
+def save_meta(data):
     with open(META_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
@@ -76,7 +76,7 @@ async def search(dataset: str, q: str):
     tmp.write("\n".join(results))
     tmp.close()
 
-    return FileResponse(tmp.name, filename="sonuclar.txt")
+    return FileResponse(tmp.name, filename="sonuclar.txt", media_type="text/plain")
 
 # ================== TELEGRAM BOT ==================
 application = Application.builder().token(BOT_TOKEN).build()
@@ -89,25 +89,25 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def file_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    doc = update.message.document
-    if not doc:
+    if not update.message.document:
         return
 
+    doc = update.message.document
     original_name = doc.file_name
     name = clean(os.path.splitext(original_name)[0])
     extension = os.path.splitext(original_name)[1]
     path = f"{DATA_DIR}/{name}{extension}"
 
-    progress_msg = await update.message.reply_text("📥 Yükleniyor: %0")
+    msg = await update.message.reply_text("📥 Yükleniyor: %0")
 
-    last_percent = {"v": 0}
+    last = {"p": 0}
 
     async def progress(current, total):
         percent = int(current * 100 / total)
-        if percent % 5 == 0 and percent != last_percent["v"]:
-            last_percent["v"] = percent
+        if percent % 5 == 0 and percent != last["p"]:
+            last["p"] = percent
             try:
-                await progress_msg.edit_text(f"📥 Yükleniyor: %{percent}")
+                await msg.edit_text(f"📥 Yükleniyor: %{percent}")
             except:
                 pass
 
@@ -124,7 +124,7 @@ async def file_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_meta(meta)
 
     api_url = f"{BASE_URL}/search/{name}?q=test"
-    await progress_msg.edit_text(
+    await msg.edit_text(
         f"✅ **Yükleme Tamamlandı (%100)**\n\n"
         f"📂 {original_name}\n"
         f"🔗 API:\n{api_url}",
@@ -145,7 +145,8 @@ async def startup():
 async def telegram_webhook(request: Request):
     data = await request.json()
     update = Update.de_json(data, application.bot)
-    await application.process_update(update)
+    if update:
+        await application.process_update(update)
     return {"ok": True}
 
 @app.on_event("shutdown")
