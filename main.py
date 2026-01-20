@@ -47,73 +47,83 @@ def save_meta(data: dict):
 meta = load_meta()
 
 # ================== FASTAPI APP ==================
-app = FastAPI(title="Telegram Dosya Arama Botu")
+app = FastAPI(title="LORD SYSTEM - Dosya Arama API")
 
 @app.get("/")
 async def home():
-    return {"status": "ok", "datasets": list(meta.keys())}
+    return {"message": "👑 LORD SYSTEM 👑", "status": "aktif", "datasets": list(meta.keys()), "kullanim": " /search/{dataset}?q=kelime ile ara"}
 
 @app.get("/search/{dataset}")
 async def search(dataset: str, q: str):
     dataset = clean(dataset)
     if dataset not in meta:
-        return {"error": "Dataset bulunamadı"}
+        return {"error": "Dataset bulunamadı! Mevcutlar: " + ", ".join(meta.keys())}
 
     path = meta[dataset]["path"]
     results = []
 
     try:
+        # Dosya metin tabanlıysa ara (TXT, CSV vb.)
         with open(path, "r", encoding="utf-8", errors="ignore") as f:
             for line in f:
                 if q.lower() in line.lower():
                     results.append(line.strip())
+    except UnicodeDecodeError:
+        return {"error": "Bu dosya metin tabanlı değil (resim/video vb.), arama desteklenmiyor. İndirmek için doğrudan erişin."}
     except Exception as e:
-        return {"error": f"Dosya okuma hatası: {str(e)}"}
+        return {"error": f"Hata: {str(e)}"}
 
     if len(results) <= MAX_RESULTS:
         return {"count": len(results), "results": results}
 
-    # Büyük sonuçlar için dosya döndür
+    # Büyük sonuçlar için TXT döndür
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".txt", mode="w", encoding="utf-8")
     tmp.write("\n".join(results))
     tmp.close()
 
-    return FileResponse(tmp.name, filename="sonuclar.txt", media_type="text/plain")
+    return FileResponse(tmp.name, filename="lord_sonuclar.txt", media_type="text/plain")
 
 # ================== TELEGRAM BOT ==================
 application = Application.builder().token(BOT_TOKEN).build()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "📂 TXT formatında dosya gönder → Otomatik API oluşur\n"
-        "🔎 Arama: /search/dosya?q=kelime\n"
-        "Örnek: https://senin-url.onrender.com/search/dosya?q=test"
+        "👑 **LORD SYSTEM Botuna Hoş Geldin!** 👑\n\n"
+        "📁 Her türlü dosyayı (TXT, PDF, resim, video vb.) gönder → Otomatik API oluştururum!\n"
+        "🔍 Arama Örneği: {BASE_URL}/search/dosya?q=kelime\n"
+        "🗂 Mevcut dataset'ler: {datasets}\n\n"
+        "Hemen bir dosya gönder, sihir başlasın! 🚀".format(
+            BASE_URL=BASE_URL,
+            datasets=", ".join(meta.keys()) if meta else "Henüz yok"
+        ),
+        parse_mode="Markdown"
     )
 
 async def file_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.document:
-        await update.message.reply_text("Lütfen bir TXT dosyası gönder.")
+        await update.message.reply_text("❌ Lütfen bir dosya gönder (her türlü kabul ediyorum!).")
         return
 
     doc = update.message.document
-    if not doc.file_name.lower().endswith(('.txt', '.text')):
-        await update.message.reply_text("Sadece .txt dosyaları destekleniyor.")
-        return
-
-    name = clean(os.path.splitext(doc.file_name)[0])
-    path = f"{DATA_DIR}/{name}.txt"
+    original_name = doc.file_name
+    name = clean(os.path.splitext(original_name)[0])
+    extension = os.path.splitext(original_name)[1]
+    path = f"{DATA_DIR}/{name}{extension}"  # Uzantıyı koru
 
     file = await doc.get_file()
     await file.download_to_drive(custom_path=path)
 
-    meta[name] = {"path": path}
+    meta[name] = {"path": path, "original_name": original_name}
     save_meta(meta)
 
     api_url = f"{BASE_URL}/search/{name}?q=test"
     await update.message.reply_text(
-        f"✅ Dosya yüklendi!\n"
-        f"API hazır: {api_url}\n"
-        f"Arama örneği: {api_url}"
+        f"✅ **Dosya Yüklendi!** 📂\n"
+        f"İsim: {original_name}\n"
+        f"API Hazır: [{api_url}]({api_url})\n"
+        f"Arama yap: ?q=kelime ekle (büyük sonuçlar TXT olarak döner)\n"
+        f"👑 LORD SYSTEM aktif! 👑",
+        parse_mode="Markdown"
     )
 
 # Handler'ları ekle
@@ -126,7 +136,7 @@ async def startup_event():
     await application.initialize()
     webhook_url = f"{BASE_URL}/telegram"
     
-    # Mevcut webhook'u silip yeniden ayarla (güvenlik için)
+    # Mevcut webhook'u silip yeniden ayarla
     await application.bot.delete_webhook(drop_pending_updates=True)
     success = await application.bot.set_webhook(
         url=webhook_url,
@@ -159,7 +169,7 @@ async def telegram_webhook(request: Request):
 # ================== UYGULAMAYI BAŞLAT ==================
 if __name__ == "__main__":
     uvicorn.run(
-        "main:app",
+        "main:app",  # Dosya adın main.py ise
         host="0.0.0.0",
         port=PORT,
         log_level="info"
