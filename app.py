@@ -128,7 +128,7 @@ def search(dataset):
         for line in f:
             if q and q in line:
                 results.append(line.strip())
-                if len(results) >= 50:
+                if len(results) >= 100:
                     break
 
     return jsonify({
