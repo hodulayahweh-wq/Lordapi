@@ -5,9 +5,9 @@ import threading
 import tempfile
 import asyncio
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
-from telegram import Update
+from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 import uvicorn
 
@@ -55,10 +55,10 @@ def search(dataset: str, q: str):
     dataset = clean_name(dataset)
 
     if dataset not in meta:
-        raise HTTPException(status_code=404, detail="dataset yok")
+        raise HTTPException(404, "dataset yok")
 
     if not meta[dataset]["active"]:
-        raise HTTPException(status_code=403, detail="dataset kapalı")
+        raise HTTPException(403, "dataset kapali")
 
     path = meta[dataset]["path"]
     query = q.lower()
@@ -91,7 +91,7 @@ def search(dataset: str, q: str):
 # ================= TELEGRAM =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Dosya gönder → API oluşur\n"
+        "TXT dosya gönder → API oluşur\n"
         "Örnek: /search/rehber?q=ali"
     )
 
@@ -111,7 +111,7 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_meta(meta)
 
     await update.message.reply_text(
-        "API hazır:\n" + BASE_URL + "/search/" + name + "?q=kelime"
+        "API hazir:\n" + BASE_URL + "/search/" + name + "?q=kelime"
     )
 
 async def listele(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -157,25 +157,29 @@ async def sil(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("Yok")
 
-async def run_bot():
-    tg = Application.builder().token(BOT_TOKEN).build()
+# ================= WEBHOOK =================
+bot = Bot(BOT_TOKEN)
+tg_app = Application.builder().token(BOT_TOKEN).build()
 
-    tg.add_handler(CommandHandler("start", start))
-    tg.add_handler(CommandHandler("listele", listele))
-    tg.add_handler(CommandHandler("kapat", kapat))
-    tg.add_handler(CommandHandler("ac", ac))
-    tg.add_handler(CommandHandler("sil", sil))
-    tg.add_handler(MessageHandler(filters.Document.ALL, handle_file))
+tg_app.add_handler(CommandHandler("start", start))
+tg_app.add_handler(CommandHandler("listele", listele))
+tg_app.add_handler(CommandHandler("kapat", kapat))
+tg_app.add_handler(CommandHandler("ac", ac))
+tg_app.add_handler(CommandHandler("sil", sil))
+tg_app.add_handler(MessageHandler(filters.Document.ALL, handle_file))
 
-    if BASE_URL:
-        await tg.bot.set_webhook(BASE_URL + "/telegram")
-        await tg.initialize()
-        await tg.start()
-    else:
-        await tg.run_polling()
+@app.post("/telegram")
+async def telegram_webhook(request: Request):
+    data = await request.json()
+    update = Update.de_json(data, bot)
+    await tg_app.process_update(update)
+    return {"ok": True}
 
 def start_bot():
-    asyncio.run(run_bot())
+    async def init():
+        await tg_app.initialize()
+        await bot.set_webhook(BASE_URL + "/telegram")
+    asyncio.run(init())
 
 # ================= MAIN =================
 if __name__ == "__main__":
