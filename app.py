@@ -1,13 +1,16 @@
 import telebot
-import os, re, zipfile, py7zr, uuid
+import os
+import zipfile
+import py7zr
+import re
 from flask import Flask, request, jsonify, send_file
 
 # ================= AYARLAR =================
-TOKEN = "8467419515:AAF1gfziyraoZOX_t7gs2kPS_qyfwif-bV0"
-BASE_URL = "https://lordv3api.onrender.com"
+TOKEN = os.environ.get("BOT_TOKEN", "BOT_TOKEN_BURAYA")
+BASE_URL = os.environ.get("BASE_URL", "https://lordv3api.onrender.com")
 
 MAX_UPLOAD_MB = 30
-MAX_JSON_RESULTS = 3   # 🔥 JSON EN FAZLA 3
+MAX_JSON_RESULT = 3
 
 bot = telebot.TeleBot(TOKEN, threaded=False)
 app = Flask(__name__)
@@ -15,8 +18,9 @@ app = Flask(__name__)
 STORAGE = "storage"
 UPLOAD_DIR = "uploads"
 TEMP_DIR = "temp"
+OUT_DIR = "out"
 
-for d in (STORAGE, UPLOAD_DIR, TEMP_DIR):
+for d in (STORAGE, UPLOAD_DIR, TEMP_DIR, OUT_DIR):
     os.makedirs(d, exist_ok=True)
 
 # ================= WEBHOOK =================
@@ -37,41 +41,37 @@ def start(m):
     bot.send_message(
         m.chat.id,
         "✅ LORD API\n\n"
-        "📂 TXT / ZIP / 7Z / JSON\n"
-        "📦 Maksimum dosya: 30 MB\n"
-        "🔎 TC / AD / GSM / SIRA NO\n"
-        "📄 JSON max 3 kayıt"
+        "📂 TXT / ZIP / 7Z / JSON gönder\n"
+        "📦 Dosya limiti: 30 MB\n"
+        "🔎 API gelen isteği otomatik okur\n"
+        "📤 Fazla veri olursa TXT verir"
     )
 
 @bot.message_handler(content_types=["document"])
 def handle_file(m):
     try:
-        if m.document.file_size > MAX_UPLOAD_MB * 1024 * 1024:
-            bot.send_message(m.chat.id, "❌ Dosya 30 MB sınırını aşıyor")
+        size_mb = m.document.file_size / (1024 * 1024)
+        if size_mb > MAX_UPLOAD_MB:
+            bot.send_message(m.chat.id, "❌ Dosya 30 MB üstü")
             return
 
         file_info = bot.get_file(m.document.file_id)
         raw = bot.download_file(file_info.file_path)
         filename = m.document.file_name
 
-        dataset = re.sub(r'[^a-zA-Z0-9_]', '',
-                          os.path.splitext(filename)[0]).lower()
+        dataset = re.sub(r'[^a-zA-Z0-9_]', '', os.path.splitext(filename)[0]).lower()
         data_path = os.path.join(STORAGE, f"{dataset}.txt")
 
-        temp_file = os.path.join(UPLOAD_DIR, filename)
-        with open(temp_file, "wb") as f:
-            f.write(raw)
-
-        added = 0
-
         def add_lines(lines):
-            nonlocal added
             with open(data_path, "a", encoding="utf-8", errors="ignore") as out:
                 for l in lines:
                     l = l.strip()
                     if l:
                         out.write(l + "\n")
-                        added += 1
+
+        temp_file = os.path.join(UPLOAD_DIR, filename)
+        with open(temp_file, "wb") as f:
+            f.write(raw)
 
         if filename.lower().endswith((".txt", ".json")):
             with open(temp_file, "r", errors="ignore") as f:
@@ -95,10 +95,9 @@ def handle_file(m):
 
         bot.send_message(
             m.chat.id,
-            f"✅ Dataset hazır\n"
-            f"📦 {dataset}\n"
-            f"📄 Satır: {added}\n\n"
-            f"🔗 {BASE_URL}/api/v1/search/{dataset}?ara=DEGER"
+            f"✅ Dataset yüklendi\n"
+            f"📦 {dataset}\n\n"
+            f"🔗 {BASE_URL}/api/v1/search/{dataset}?q=DEGER"
         )
 
     except Exception as e:
@@ -112,45 +111,37 @@ def home():
 @app.route("/api/v1/search/<dataset>")
 def search(dataset):
     dataset = re.sub(r'[^a-zA-Z0-9_]', '', dataset).lower()
-    q = request.args.get("ara", "").strip()
+    q = request.args.get("q", "").strip()
 
     path = os.path.join(STORAGE, f"{dataset}.txt")
     if not os.path.exists(path):
         return jsonify({"error": "dataset bulunamadı"})
 
     results = []
-    temp_txt = None
-
     with open(path, "r", errors="ignore") as f:
         for line in f:
-            if not q or q in line:
+            if q in line:
                 results.append(line.strip())
-
-                # 🔥 3'ü geçerse TXT'ye geç
-                if len(results) > MAX_JSON_RESULTS:
-                    temp_name = f"result_{uuid.uuid4().hex}.txt"
-                    temp_txt = os.path.join(TEMP_DIR, temp_name)
-
-                    with open(temp_txt, "w", encoding="utf-8") as out:
-                        for r in results:
-                            out.write(r + "\n")
-                        for l in f:
-                            if not q or q in l:
-                                out.write(l)
-
+                if len(results) > MAX_JSON_RESULT:
                     break
 
-    if temp_txt:
-        return send_file(
-            temp_txt,
-            as_attachment=True,
-            download_name="sonuc.txt",
-            mimetype="text/plain"
-        )
+    # 🔹 JSON sınırı
+    if len(results) <= MAX_JSON_RESULT:
+        return jsonify({
+            "dataset": dataset,
+            "query": q,
+            "count": len(results),
+            "results": results
+        })
 
-    return jsonify({
-        "dataset": dataset,
-        "query": q,
-        "count": len(results),
-        "results": results
-    })
+    # 🔹 Fazlaysa TXT ver
+    out_file = os.path.join(OUT_DIR, f"{dataset}_{q}.txt")
+    with open(out_file, "w", encoding="utf-8") as f:
+        for r in results:
+            f.write(r + "\n")
+
+    return send_file(out_file, as_attachment=True)
+
+# ================= RUN (ZORUNLU) =================
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
