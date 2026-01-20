@@ -1,20 +1,24 @@
 import os
 import re
 import json
-import threading
-import tempfile
 import asyncio
-
-from fastapi import FastAPI, HTTPException, Request
+import tempfile
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import FileResponse
 from telegram import Update, Bot
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    filters
+)
 import uvicorn
 
-# ================= AYARLAR =================
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-BASE_URL = os.getenv("BASE_URL")
-PORT = int(os.getenv("PORT", "8000"))
+# ================== AYAR ==================
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+BASE_URL = os.environ.get("BASE_URL")
+PORT = int(os.environ.get("PORT", 8000))
 
 DATA_DIR = "datasets"
 META_FILE = "datasets/meta.json"
@@ -22,142 +26,108 @@ MAX_JSON_RESULTS = 50
 
 os.makedirs(DATA_DIR, exist_ok=True)
 
-# ================= YARDIMCI =================
-def clean_name(name):
-    name = name.lower()
-    name = re.sub(r"[^a-z0-9_-]", "", name)
-    return name
+# ================== YARDIMCI ==================
+def temizle(isim):
+    return re.sub(r"[^a-z0-9_-]", "", isim.lower())
 
-def load_meta():
+def meta_yukle():
     if not os.path.exists(META_FILE):
         return {}
     with open(META_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
 
-def save_meta(meta):
+def meta_kaydet(m):
     with open(META_FILE, "w", encoding="utf-8") as f:
-        json.dump(meta, f, ensure_ascii=False, indent=2)
+        json.dump(m, f, ensure_ascii=False, indent=2)
 
-meta = load_meta()
+meta = meta_yukle()
 
-# ================= FASTAPI =================
+# ================== FASTAPI ==================
 app = FastAPI()
 
 @app.get("/")
 def root():
-    return {
-        "status": "ok",
-        "datasets": list(meta.keys())
-    }
+    return {"status": "ok", "apis": list(meta.keys())}
 
-@app.get("/search/{dataset}")
-def search(dataset: str, q: str):
-    dataset = clean_name(dataset)
+@app.get("/search/{api}")
+def search(api: str, q: str):
+    api = temizle(api)
 
-    if dataset not in meta:
-        raise HTTPException(404, "dataset yok")
+    if api not in meta:
+        raise HTTPException(404, "API yok")
 
-    if not meta[dataset]["active"]:
-        raise HTTPException(403, "dataset kapali")
+    if not meta[api]["active"]:
+        raise HTTPException(403, "API kapalı")
 
-    path = meta[dataset]["path"]
-    query = q.lower()
-    results = []
+    path = meta[api]["path"]
+    sonuc = []
 
     with open(path, "r", encoding="utf-8", errors="ignore") as f:
-        for line in f:
-            if query in line.lower():
-                results.append(line.strip())
+        for satir in f:
+            if q.lower() in satir.lower():
+                sonuc.append(satir.strip())
 
-    if len(results) <= MAX_JSON_RESULTS:
-        return {
-            "dataset": dataset,
-            "query": query,
-            "count": len(results),
-            "results": results
-        }
+    if len(sonuc) <= MAX_JSON_RESULTS:
+        return {"count": len(sonuc), "results": sonuc}
 
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".txt")
     with open(tmp.name, "w", encoding="utf-8") as out:
-        for r in results:
-            out.write(r + "\n")
+        for s in sonuc:
+            out.write(s + "\n")
 
-    return FileResponse(
-        tmp.name,
-        filename=dataset + "_results.txt",
-        media_type="text/plain"
-    )
+    return FileResponse(tmp.name, filename=f"{api}_sonuc.txt")
 
-# ================= TELEGRAM =================
+# ================== TELEGRAM ==================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "TXT dosya gönder → API oluşur\n"
-        "Örnek: /search/rehber?q=ali"
+        "TXT gönder → otomatik API oluşur\n"
+        "Örnek:\n/search/rehber?q=ali"
     )
 
-async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def dosya(update: Update, context: ContextTypes.DEFAULT_TYPE):
     doc = update.message.document
-    raw = os.path.splitext(doc.file_name)[0]
-    name = clean_name(raw)
+    isim = temizle(os.path.splitext(doc.file_name)[0])
 
     file = await doc.get_file()
-    path = os.path.join(DATA_DIR, name + ".txt")
-    await file.download_to_drive(path)
+    yol = os.path.join(DATA_DIR, isim + ".txt")
+    await file.download_to_drive(yol)
 
-    meta[name] = {
-        "path": path,
-        "active": True
-    }
-    save_meta(meta)
+    meta[isim] = {"path": yol, "active": True}
+    meta_kaydet(meta)
 
     await update.message.reply_text(
-        "API hazir:\n" + BASE_URL + "/search/" + name + "?q=kelime"
+        "API hazır:\n"
+        f"{BASE_URL}/search/{isim}?q=kelime"
     )
 
 async def listele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not meta:
-        await update.message.reply_text("Dataset yok")
+        await update.message.reply_text("API yok")
         return
-
     text = "API Listesi:\n"
     for k in meta:
-        state = "acik" if meta[k]["active"] else "kapali"
-        text += k + " (" + state + ")\n"
-
+        text += f"{k} ({'açık' if meta[k]['active'] else 'kapalı'})\n"
     await update.message.reply_text(text)
 
 async def kapat(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    name = clean_name(" ".join(context.args))
-    if name in meta:
-        meta[name]["active"] = False
-        save_meta(meta)
-        await update.message.reply_text(name + " kapatildi")
+    isim = temizle(" ".join(context.args))
+    if isim in meta:
+        meta[isim]["active"] = False
+        meta_kaydet(meta)
+        await update.message.reply_text("Kapatıldı")
     else:
         await update.message.reply_text("Yok")
 
 async def ac(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    name = clean_name(" ".join(context.args))
-    if name in meta:
-        meta[name]["active"] = True
-        save_meta(meta)
-        await update.message.reply_text(name + " acildi")
+    isim = temizle(" ".join(context.args))
+    if isim in meta:
+        meta[isim]["active"] = True
+        meta_kaydet(meta)
+        await update.message.reply_text("Açıldı")
     else:
         await update.message.reply_text("Yok")
 
-async def sil(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    name = clean_name(" ".join(context.args))
-    if name in meta:
-        try:
-            os.remove(meta[name]["path"])
-        except Exception:
-            pass
-        del meta[name]
-        save_meta(meta)
-        await update.message.reply_text(name + " silindi")
-    else:
-        await update.message.reply_text("Yok")
-
-# ================= WEBHOOK =================
+# ================== BOT ==================
 bot = Bot(BOT_TOKEN)
 tg_app = Application.builder().token(BOT_TOKEN).build()
 
@@ -165,24 +135,20 @@ tg_app.add_handler(CommandHandler("start", start))
 tg_app.add_handler(CommandHandler("listele", listele))
 tg_app.add_handler(CommandHandler("kapat", kapat))
 tg_app.add_handler(CommandHandler("ac", ac))
-tg_app.add_handler(CommandHandler("sil", sil))
-tg_app.add_handler(MessageHandler(filters.Document.ALL, handle_file))
+tg_app.add_handler(MessageHandler(filters.Document.ALL, dosya))
 
 @app.post("/telegram")
-async def telegram_webhook(request: Request):
-    data = await request.json()
+async def telegram_webhook(req: Request):
+    data = await req.json()
     update = Update.de_json(data, bot)
     await tg_app.process_update(update)
     return {"ok": True}
 
-def start_bot():
-    async def init():
-        await tg_app.initialize()
-        await bot.set_webhook(BASE_URL + "/telegram")
-    asyncio.run(init())
+async def webhook_ayarla():
+    await tg_app.initialize()
+    await bot.set_webhook(BASE_URL + "/telegram")
 
-# ================= MAIN =================
+# ================== MAIN ==================
 if __name__ == "__main__":
-    t = threading.Thread(target=start_bot, daemon=True)
-    t.start()
+    asyncio.get_event_loop().run_until_complete(webhook_ayarla())
     uvicorn.run(app, host="0.0.0.0", port=PORT)
