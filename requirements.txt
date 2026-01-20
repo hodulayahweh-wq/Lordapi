@@ -1,5 +1,3 @@
-pyTelegramBotAPI
-flask
-py7zr
-requests
-gunicorn
+fastapi
+uvicorn
+python-telegram-bot==21.6
